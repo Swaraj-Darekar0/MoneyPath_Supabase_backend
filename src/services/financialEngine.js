@@ -178,6 +178,44 @@ function calculateDailySavingTarget(goals) {
 
 
 /**
+ * Calculates the sum of income and expenses for the current day.
+ * @param {object} supabase - The user-scoped Supabase client.
+ * @param {string} userId - The ID of the user.
+ * @returns {object} An object containing todayIncome and todayExpenses.
+ */
+const getDailyTransactionTotals = async (supabase, userId) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+
+  const { data: transactions, error } = await supabase
+    .from('transactions')
+    .select('amount')
+    .eq('user_id', userId)
+    .gte('created_at', today.toISOString())
+    .lt('created_at', tomorrow.toISOString());
+
+  if (error) {
+    console.error('Error fetching daily transactions:', error);
+    throw new Error('Could not fetch daily transactions.');
+  }
+
+  let todayIncome = 0;
+  let todayExpenses = 0;
+
+  transactions.forEach(transaction => {
+    if (transaction.amount > 0) {
+      todayIncome += transaction.amount;
+    } else {
+      todayExpenses += Math.abs(transaction.amount);
+    }
+  });
+
+  return { todayIncome, todayExpenses };
+};
+
+/**
  * Allocates income to user's goals based on category weights and updates profile.
  * @param {object} supabase - The user-scoped Supabase client.
  * @param {string} userId - The ID of the user.
@@ -206,18 +244,20 @@ const allocateIncomeAndRecalculate = async (supabase, userId, incomeAmount) => {
       console.error('Error fetching profile for balance update:', profileError);
       throw new Error('Failed to fetch profile for balance update.');
   }
-  
+
   const newTotalBalance = (profile.total_balance || 0) + incomeAmount;
-  const newTodayIncome = (profile.today_income || 0) + incomeAmount;
+
+  // Recalculate today's income and expenses based on all transactions for the day
+  const { todayIncome, todayExpenses } = await getDailyTransactionTotals(supabase, userId);
 
   // Calculate new daily savings target before allocation
   const newDailySavingsTarget = calculateDailySavingTarget(goals);
 
   // Check for surplus
   const surplusStatus = handleSurplus(
-    incomeAmount,
+    todayIncome, // Use recalculated todayIncome
     newDailySavingsTarget,
-    profile.today_expenses || 0,
+    todayExpenses, // Use recalculated todayExpenses
     goals
   );
 
@@ -250,7 +290,7 @@ const allocateIncomeAndRecalculate = async (supabase, userId, incomeAmount) => {
     }
   }
 
-  const updatedProfileData = { ...profile, total_balance: newTotalBalance, today_income: newTodayIncome };
+  const updatedProfileData = { ...profile, total_balance: newTotalBalance, today_income: todayIncome, today_expenses: todayExpenses };
 
   // Calculate buffer status
   let totalSavingRequired = 0;
@@ -276,12 +316,14 @@ const allocateIncomeAndRecalculate = async (supabase, userId, incomeAmount) => {
     .from('profiles')
     .update({
       total_balance: newTotalBalance,
-      today_income: newTodayIncome,
+      today_income: todayIncome,
+      today_expenses: todayExpenses,
       daily_savings_target: newDailySavingsTarget,
       daily_spending_buffer: newDailySpendingBuffer,
       buffer_status: bufferStatus.status,
       buffer_days: bufferStatus.bufferDays,
       surplus_allocation: surplusStatus ? JSON.stringify(surplusStatus) : null,
+      last_daily_reset_date: new Date().toISOString().split('T')[0],
       updated_at: new Date().toISOString(),
     })
     .eq('id', userId);
@@ -336,9 +378,11 @@ const handleExpense = async (supabase, userId, expenseAmount) => {
     if (profileError) throw new Error('Could not fetch profile for expense.');
 
     const newTotalBalance = (profile.total_balance || 0) - expenseAmount;
-    const newTodayExpenses = (profile.today_expenses || 0) + expenseAmount;
+
+    // Recalculate today's income and expenses based on all transactions for the day
+    const { todayIncome, todayExpenses } = await getDailyTransactionTotals(supabase, userId);
     
-    const updatedProfileData = { ...profile, total_balance: newTotalBalance, today_expenses: newTodayExpenses };
+    const updatedProfileData = { ...profile, total_balance: newTotalBalance, today_income: todayIncome, today_expenses: todayExpenses };
 
     const newDailySavingsTarget = calculateDailySavingTarget(goals);
     const newDailySpendingBuffer = calculateDailySpendingBuffer(updatedProfileData, newDailySavingsTarget, goals);
@@ -368,12 +412,14 @@ const handleExpense = async (supabase, userId, expenseAmount) => {
         .from('profiles')
         .update({
             total_balance: newTotalBalance,
-            today_expenses: newTodayExpenses,
+            today_expenses: todayExpenses,
+            today_income: todayIncome,
             daily_savings_target: newDailySavingsTarget,
             daily_spending_buffer: newDailySpendingBuffer,
             buffer_status: bufferStatus.status,
             buffer_days: bufferStatus.bufferDays,
             overspending_recovery: overspendingStatus ? JSON.stringify(overspendingStatus) : null,
+            last_daily_reset_date: new Date().toISOString().split('T')[0],
             updated_at: new Date().toISOString()
         })
         .eq('id', userId);
