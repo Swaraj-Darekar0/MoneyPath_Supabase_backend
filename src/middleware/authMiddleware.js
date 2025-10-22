@@ -1,29 +1,24 @@
 const supabase = require('../config/supabaseClient');
 
 const authMiddleware = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
+  const token = req.headers.authorization?.split(' ')[1];
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: No token provided' });
+  if (!token) {
+    return res.status(401).json({ error: 'No token provided' });
   }
 
-  const token = authHeader.split(' ')[1];
-
   try {
-    const { data: { user }, error } = await supabase.auth.getUser(token);
+    const { data, error } = await supabase.auth.getUser(token);
 
-    if (error) {
-      return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+    if (error || !data.user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
-    if (!user) {
-        return res.status(401).json({ error: 'Unauthorized: User not found' });
-    }
-
-    req.user = user;
+    req.user = data.user; // Attach user to request object
     next();
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error during authentication' });
+    console.error('Auth middleware error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 

@@ -25,6 +25,10 @@ const createGoal = async (supabase, userId, goalData) => {
       target_amount,
       category_id,
       target_date: new Date(target_date).toISOString().split('T')[0],
+        saved_amount: 0,
+        status: 'ON_TRACK',
+        days_offset: 0,
+        status_message: 'Goal created. Start saving!'
     })
     .select()
     .single();
@@ -53,7 +57,18 @@ const getCategories = async (supabase) => {
 const getGoals = async (supabase, userId) => {
   const { data: goals, error } = await supabase
     .from('goals')
-    .select('id, name, description, target_amount, saved_amount, category:categories(name), target_date')
+    .select(`
+      id,
+      name,
+      description,
+      target_amount,
+      saved_amount,
+      target_date,
+      status,
+      days_offset,
+      status_message,
+      category:categories(name, weight)
+    `)
     .eq('user_id', userId);
 
   if (error) {
@@ -63,7 +78,8 @@ const getGoals = async (supabase, userId) => {
 
   const formattedGoals = goals.map(goal => ({
     ...goal,
-    category: goal.category ? goal.category.name : null
+    category: goal.category ? goal.category.name : null,
+    categoryWeight: goal.category ? goal.category.weight : 0
   }));
 
   return formattedGoals;
