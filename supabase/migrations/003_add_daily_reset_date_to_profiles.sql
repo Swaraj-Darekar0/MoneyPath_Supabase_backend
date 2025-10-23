@@ -1,0 +1,2 @@
+ALTER TABLE profiles
+ADD COLUMN last_daily_reset_date DATE DEFAULT CURRENT_DATE;

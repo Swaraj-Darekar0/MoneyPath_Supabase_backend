@@ -1,3 +1,5 @@
+const fs = require('fs');
+
 // Mbackend/src/services/financialEngine.js
 
 /**
@@ -16,7 +18,7 @@ function calculateBufferStatus(profile, totalSavingRequired) {
         status: bufferDays < 0 ? 'CRITICAL' :
                 bufferDays < 7 ? 'LOW' :
                 bufferDays < 30 ? 'MODERATE' : 'HEALTHY',
-        message: bufferDays < 0 ? `Deficit: $${Math.abs(buffer)}. Increase income or extend deadlines.` :
+        message: bufferDays < 0 ? `Deficit: ${Math.abs(buffer)}. Increase income or extend deadlines.` :
                  bufferDays < 7 ? `${bufferDays} days of safety. Execute with caution.` :
                  bufferDays < 30 ? `${bufferDays} days of safety. Maintain discipline.` :
                  `${bufferDays} days of safety. Surplus detected.`
@@ -40,7 +42,7 @@ function detectOverspending(profile, expenseAmount, dailySpendingBuffer) {
             recoveryRequired: true,
             tomorrowTarget: profile.daily_savings_target + overspent,
             daysAdded,
-            message: `Overspent by $${overspent}. Tomorrow's target: $${profile.daily_savings_target + overspent}. All missions delayed by ${daysAdded} days.`
+            message: `Overspent by ${overspent}. Tomorrow's target: ${profile.daily_savings_target + overspent}. All missions delayed by ${daysAdded} days.`
         };
     }
     return null;
@@ -66,12 +68,16 @@ function handleSurplus(income, savingsTarget, expenses, goals) {
         }, null);
 
         if (priorityGoal) {
-            const daysAccelerated = Math.floor(surplus / (priorityGoal.target_amount / priorityGoal.daysRemaining));
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const targetDate = new Date(priorityGoal.target_date);
+            const daysRemaining = Math.max(1, Math.ceil((targetDate - today) / (1000 * 60 * 60 * 24)));
+            const daysAccelerated = Math.floor(surplus / (priorityGoal.target_amount / daysRemaining));
             return {
                 amount: surplus,
                 allocatedTo: priorityGoal.name,
                 daysAccelerated,
-                message: `Surplus: $${surplus}. ${priorityGoal.name} accelerated by ${daysAccelerated} days.`
+                message: `Surplus: ${surplus}. ${priorityGoal.name} accelerated by ${daysAccelerated} days.`
             };
         }
     }
@@ -255,7 +261,7 @@ const allocateIncomeAndRecalculate = async (supabase, userId, incomeAmount) => {
 
   // Check for surplus
   const surplusStatus = handleSurplus(
-    todayIncome, // Use recalculated todayIncome
+    incomeAmount, // Use incomeAmount directly
     newDailySavingsTarget,
     todayExpenses, // Use recalculated todayExpenses
     goals
@@ -329,6 +335,8 @@ const allocateIncomeAndRecalculate = async (supabase, userId, incomeAmount) => {
     .eq('id', userId);
 
   if (updateProfileError) {
+    const errorMessage = `Error updating profile after allocation: ${updateProfileError.message}\n`;
+    console.log(errorMessage);
     console.error('Error updating profile after allocation:', updateProfileError);
     throw new Error('Failed to update profile after allocation.');
   }
